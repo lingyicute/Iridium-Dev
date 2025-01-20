@@ -130,21 +130,21 @@ jobs:
           ccache --set-config=compression_level=$CCACHE_COMPRESSLEVEL
           ccache --set-config=sloppiness=$CCACHE_SLOPPINESS
           ccache -z  # Zero statistics
-
+          
       - name: Get Chromium source
         run: |
           cd $WORKSPACE_ROOT
           if [ ! -d "chromium/src" ]; then
             mkdir -p chromium
             cd chromium
-            fetch --nohooks android
+            fetch --nohooks --no-history android
             cd src
             git checkout $VERSION
-            gclient sync -D --force --reset
+            gclient sync --no-history -D --force --reset
           else
             cd chromium/src
             git checkout $VERSION
-            gclient sync
+            gclient sync --no-history
           fi
           gclient runhooks
 
