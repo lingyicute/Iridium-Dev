@@ -17,13 +17,14 @@ on:
 env:
   CROMITE_SHA: ${{ github.event.inputs.sha }}
   CROMITE_PREF_HASH_SEED_BIN: ${{ secrets.CROMITE_PREF_HASH_SEED_BIN }}
-  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  WORKSPACE_ROOT: /mnt/chromium_build
+  CCACHE_DIR: /mnt/chromium_build/.ccache
   CCACHE_MAXSIZE: 20G
   CCACHE_COMPRESSLEVEL: 6
-  CCACHE_LOGFILE: ${{ github.workspace }}/ccache.log
+  CCACHE_LOGFILE: /mnt/chromium_build/ccache.log
   # 使用所有可用CPU核心，但在重试时减少并行度
   NINJA_PARALLEL_JOBS: ${{ github.run_attempt == 1 && 2 || 1 }}
-  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_BASEDIR: /mnt/chromium_build
   # 增加更多宽松选项以提高缓存命中率
   CCACHE_SLOPPINESS: time_macros,include_file_mtime,file_macro,pch_defines,modules,system_headers
 
@@ -47,24 +48,32 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
+      - name: Prepare build directory
+        run: |
+          sudo mkdir -p $WORKSPACE_ROOT
+          sudo chown -R $USER:$USER $WORKSPACE_ROOT
+          # 移动当前检出的代码到新位置
+          mv cromite $WORKSPACE_ROOT/
+          cd $WORKSPACE_ROOT
+
       - name: Cache depot_tools
         id: cache-depot-tools
         uses: actions/cache@v3
         with:
-          path: depot_tools
+          path: ${{ env.WORKSPACE_ROOT }}/depot_tools
           key: depot-tools-${{ runner.os }}-${{ steps.get-version.outputs.version }}
 
       - name: Cache chromium source
         id: cache-chromium
         uses: actions/cache@v3
         with:
-          path: chromium
+          path: ${{ env.WORKSPACE_ROOT }}/chromium
           key: chromium-source-${{ runner.os }}-${{ steps.get-version.outputs.version }}
 
       - name: Cache ccache
         uses: actions/cache@v3
         with:
-          path: .ccache
+          path: ${{ env.WORKSPACE_ROOT }}/.ccache
           key: |
             ccache-${{ runner.os }}-${{ steps.get-version.outputs.version }}-${{ github.sha }}
           restore-keys: |
@@ -78,8 +87,8 @@ jobs:
           path: |
             ~/.gradle
             ~/.android
-            third_party/android_sdk
-            third_party/android_ndk
+            ${{ env.WORKSPACE_ROOT }}/chromium/src/third_party/android_sdk
+            ${{ env.WORKSPACE_ROOT }}/chromium/src/third_party/android_ndk
           key: android-deps-${{ runner.os }}-${{ steps.get-version.outputs.version }}
 
       - name: Install dependencies
@@ -106,11 +115,12 @@ jobs:
 
       - name: Setup workspace
         run: |
+          cd $WORKSPACE_ROOT
           # Set up depot_tools if not cached
           if [ ! -d "depot_tools" ]; then
             git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
           fi
-          echo "$PWD/depot_tools" >> $GITHUB_PATH
+          echo "$WORKSPACE_ROOT/depot_tools" >> $GITHUB_PATH
 
           # Configure git
           git config --global user.name "GitHub Actions Bot"
@@ -125,6 +135,7 @@ jobs:
 
       - name: Get Chromium source
         run: |
+          cd $WORKSPACE_ROOT
           if [ ! -d "chromium/src" ]; then
             mkdir -p chromium
             cd chromium
@@ -142,7 +153,7 @@ jobs:
       - name: Verify cached source
         if: steps.cache-chromium.outputs.cache-hit == 'true'
         run: |
-          cd chromium/src
+          cd $WORKSPACE_ROOT/chromium/src
           if ! git rev-parse --verify $VERSION >/dev/null 2>&1; then
             cd ../..
             rm -rf chromium
@@ -158,6 +169,7 @@ jobs:
 
       - name: Apply Cromite patches
         run: |
+          cd $WORKSPACE_ROOT
           cp -r cromite/* chromium/src/
           cd chromium/src
           python3 tools/git/patch_from_dirs.py patches
@@ -168,7 +180,7 @@ jobs:
         id: build_x64
         continue-on-error: true
         run: |
-          cd chromium/src
+          cd $WORKSPACE_ROOT/chromium/src
           # Configure GN args for release build
           gn gen --args="target_os = \"android\" $(cat ../../cromite/build/cromite.gn_args) target_cpu = \"x64\" is_debug=false is_official_build=true use_thin_lto=true android_channel=\"stable\" cc_wrapper=\"ccache\"" out/x64
           ninja -j$NINJA_PARALLEL_JOBS -C out/x64 chrome_public_apk 2>&1 | tee out/x64/build.log || {
@@ -185,7 +197,7 @@ jobs:
       - name: Retry Build Android x64
         if: ${{ (github.event.inputs.build == 'x64' || github.event.inputs.build == 'all') && steps.build_x64.outcome == 'failure' }}
         run: |
-          cd chromium/src
+          cd $WORKSPACE_ROOT/chromium/src
           rm -rf out/x64
           gn gen --args="target_os = \"android\" $(cat ../../cromite/build/cromite.gn_args) target_cpu = \"x64\" is_debug=false is_official_build=true use_thin_lto=true android_channel=\"stable\" cc_wrapper=\"ccache\"" out/x64
           ninja -j$NINJA_PARALLEL_JOBS -C out/x64 chrome_public_apk 2>&1 | tee -a out/x64/build.log || {
@@ -203,7 +215,7 @@ jobs:
         id: build_arm64
         continue-on-error: true
         run: |
-          cd chromium/src
+          cd $WORKSPACE_ROOT/chromium/src
           # Configure GN args for release build
           gn gen --args="target_os = \"android\" $(cat ../../cromite/build/cromite.gn_args) target_cpu = \"arm64\" is_debug=false is_official_build=true use_thin_lto=true android_channel=\"stable\" cc_wrapper=\"ccache\"" out/arm64
           ninja -j$NINJA_PARALLEL_JOBS -C out/arm64 chrome_public_apk 2>&1 | tee out/arm64/build.log || {
@@ -229,7 +241,7 @@ jobs:
       - name: Retry Build Android arm64
         if: ${{ (github.event.inputs.build == 'arm64' || github.event.inputs.build == 'all') && steps.build_arm64.outcome == 'failure' }}
         run: |
-          cd chromium/src
+          cd $WORKSPACE_ROOT/chromium/src
           rm -rf out/arm64
           gn gen --args="target_os = \"android\" $(cat ../../cromite/build/cromite.gn_args) target_cpu = \"arm64\" is_debug=false is_official_build=true use_thin_lto=true android_channel=\"stable\" cc_wrapper=\"ccache\"" out/arm64
           ninja -j$NINJA_PARALLEL_JOBS -C out/arm64 chrome_public_apk 2>&1 | tee -a out/arm64/build.log || {
@@ -257,7 +269,7 @@ jobs:
         id: build_arm
         continue-on-error: true
         run: |
-          cd chromium/src
+          cd $WORKSPACE_ROOT/chromium/src
           # Configure GN args for release build
           gn gen --args="target_os = \"android\" $(cat ../../cromite/build/cromite.gn_args) target_cpu = \"arm\" is_debug=false is_official_build=true use_thin_lto=true android_channel=\"stable\" cc_wrapper=\"ccache\"" out/arm
           ninja -j$NINJA_PARALLEL_JOBS -C out/arm chrome_public_apk 2>&1 | tee out/arm/build.log || {
@@ -273,7 +285,7 @@ jobs:
       - name: Retry Build Android arm
         if: ${{ (github.event.inputs.build == 'arm' || github.event.inputs.build == 'all') && steps.build_arm.outcome == 'failure' }}
         run: |
-          cd chromium/src
+          cd $WORKSPACE_ROOT/chromium/src
           rm -rf out/arm
           gn gen --args="target_os = \"android\" $(cat ../../cromite/build/cromite.gn_args) target_cpu = \"arm\" is_debug=false is_official_build=true use_thin_lto=true android_channel=\"stable\" cc_wrapper=\"ccache\"" out/arm
           ninja -j$NINJA_PARALLEL_JOBS -C out/arm chrome_public_apk 2>&1 | tee -a out/arm/build.log || {
@@ -297,7 +309,7 @@ jobs:
         run: |
           for arch in x64 arm64 arm; do
             if [[ "${{ github.event.inputs.build }}" == "$arch" || "${{ github.event.inputs.build }}" == "all" ]]; then
-              if [ ! -f "chromium/src/out/$arch/apks/ChromePublic.apk" ]; then
+              if [ ! -f "$WORKSPACE_ROOT/chromium/src/out/$arch/apks/ChromePublic.apk" ]; then
                 echo "Build artifact missing for $arch"
                 exit 1
               fi
@@ -310,10 +322,10 @@ jobs:
         with:
           name: cromite-android-${{ github.event.inputs.build }}
           path: |
-            chromium/src/out/*/apks/ChromePublic.apk
-            chromium/src/out/*/RELEASE
-            chromium/src/out/*/symbols/
-            chromium/src/out/*/build.log
-            chromium/src/out/*/gn_args_list.txt
-            chromium/src/out/*/ninja_*.txt
-            ccache.log 
+            ${{ env.WORKSPACE_ROOT }}/chromium/src/out/*/apks/ChromePublic.apk
+            ${{ env.WORKSPACE_ROOT }}/chromium/src/out/*/RELEASE
+            ${{ env.WORKSPACE_ROOT }}/chromium/src/out/*/symbols/
+            ${{ env.WORKSPACE_ROOT }}/chromium/src/out/*/build.log
+            ${{ env.WORKSPACE_ROOT }}/chromium/src/out/*/gn_args_list.txt
+            ${{ env.WORKSPACE_ROOT }}/chromium/src/out/*/ninja_*.txt
+            ${{ env.WORKSPACE_ROOT }}/ccache.log 
