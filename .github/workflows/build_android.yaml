@@ -1,6 +1,4 @@
-name: Build Iridium Android
-permissions:
-  contents: read
+name: Build Iridium
 
 on:
   workflow_dispatch:
