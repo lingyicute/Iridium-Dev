@@ -26,8 +26,6 @@ env:
   CCACHE_BASEDIR: ${{ github.workspace }}
   # 增加更多宽松选项以提高缓存命中率
   CCACHE_SLOPPINESS: time_macros,include_file_mtime,file_macro,pch_defines,modules,system_headers
-  # 启用本地预处理以提高性能
-  CCACHE_CPP2: true
 
 jobs:
   build:
@@ -123,7 +121,6 @@ jobs:
           ccache --set-config=compression=true
           ccache --set-config=compression_level=$CCACHE_COMPRESSLEVEL
           ccache --set-config=sloppiness=$CCACHE_SLOPPINESS
-          ccache --set-config=cpp2=$CCACHE_CPP2
           ccache -z  # Zero statistics
 
       - name: Get Chromium source
