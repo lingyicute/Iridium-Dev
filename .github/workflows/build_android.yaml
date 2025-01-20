@@ -90,7 +90,15 @@ jobs:
         run: |
           sudo dpkg --add-architecture i386
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get -y install python sed tzdata build-essential lib32gcc-9-dev g++-multilib dos2unix wiggle lsb-release ninja-build ccache
+          sudo DEBIAN_FRONTEND=noninteractive apt-get -y install ccache python-is-python3 sed tzdata build-essential lib32gcc-9-dev g++-multilib dos2unix wiggle lsb-release ninja-build
+
+          # 验证ccache安装
+          which ccache || {
+            echo "ccache not found, trying to install again..."
+            sudo apt-get update
+            sudo apt-get install -y ccache
+          }
+          ccache --version
 
           # Download and run Chromium's build deps install script
           wget https://raw.githubusercontent.com/chromium/chromium/$VERSION/build/install-build-deps.sh
